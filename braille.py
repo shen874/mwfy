@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-"""
-Braille translation with BERT encoder + MoE-enhanced Transformer decoder.
-ASCII-only logs to avoid Unicode console/encoding issues.
-"""
 
 import os
 import math
@@ -47,33 +40,6 @@ def set_seed(seed: int = 42):
 # -----------------------------
 class Config:
     def __init__(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--data_dir", type=str, required=True, help="Path to the data directory")
-        parser.add_argument("--bert_path", type=str, default="bert-base-chinese", help="HF model id or local path")
-        parser.add_argument("--max_src_len", type=int, default=128)
-        parser.add_argument("--max_tgt_len", type=int, default=128)
-
-        # Model
-        parser.add_argument("--d_model", type=int, default=768)
-        parser.add_argument("--nhead", type=int, default=8)
-        parser.add_argument("--num_decoder_layers", type=int, default=6)
-        parser.add_argument("--dim_feedforward", type=int, default=2048)
-        parser.add_argument("--dropout", type=float, default=0.1)
-        parser.add_argument("--moe_n_experts", type=int, default=4)
-        parser.add_argument("--moe_aux_coef", type=float, default=1e-2)
-
-        # Train
-        parser.add_argument("--batch_size", type=int, default=32)
-        parser.add_argument("--epochs", type=int, default=10)
-        parser.add_argument("--learning_rate", type=float, default=1e-4)
-        parser.add_argument("--warmup_ratio", type=float, default=0.06)
-        parser.add_argument("--grad_accumulation", type=int, default=1)
-        parser.add_argument("--max_grad_norm", type=float, default=1.0)
-        parser.add_argument("--seed", type=int, default=42)
-
-        # Paths
-        parser.add_argument("--model_dir", type=str, default="models")
-        parser.add_argument("--log_dir", type=str, default="logs")
 
         args, _ = parser.parse_known_args()
 
@@ -115,9 +81,6 @@ os.makedirs(config.model_dir, exist_ok=True)
 os.makedirs(config.log_dir, exist_ok=True)
 
 
-# -----------------------------
-# Metrics JSON helpers
-# -----------------------------
 def _read_metrics_json(path: str):
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
@@ -132,12 +95,10 @@ def _append_metrics(path: str, record: dict):
     data = _read_metrics_json(path)
     data.append(record)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=True, indent=2)  # ensure_ascii=True -> ASCII-only file
+        json.dump(data, f, ensure_ascii=True, indent=2) 
 
 
-# -----------------------------
-# Dataset
-# -----------------------------
+
 class BrailleDataset(Dataset):
     """
     Each record in JSON must have:
@@ -219,9 +180,7 @@ class BrailleDataset(Dataset):
         }
 
 
-# -----------------------------
-# MoE
-# -----------------------------
+
 class MoEGate(nn.Module):
     def __init__(self, d_model: int, n_experts: int, noisy: bool = True):
         super().__init__()
@@ -275,9 +234,6 @@ class MoEFFN(nn.Module):
         return y
 
 
-# -----------------------------
-# Positional Encoding
-# -----------------------------
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model: int, max_len: int = 5000):
         super().__init__()
@@ -293,9 +249,7 @@ class PositionalEncoding(nn.Module):
         return x + self.pe[:T]
 
 
-# -----------------------------
-# Model
-# -----------------------------
+
 class BrailleTranslatorMoE(nn.Module):
     def __init__(self, braille_vocab_size: int, n_experts: int = 4):
         super().__init__()
@@ -342,8 +296,8 @@ class BrailleTranslatorMoE(nn.Module):
 
     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor, braille_ids: torch.Tensor):
         enc = self.bert(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state  # (N, S, D)
-        enc = enc.transpose(0, 1)  # (S, N, D)
-        enc = self.moe(enc)        # (S, N, D)
+        enc = enc.transpose(0, 1)  
+        enc = self.moe(enc)
 
         tgt = self.braille_embedding(braille_ids).transpose(0, 1)  # (T, N, D)
         tgt = self.positional_encoding(tgt)
@@ -352,8 +306,8 @@ class BrailleTranslatorMoE(nn.Module):
         assert self.braille_vocab is not None, "braille_vocab not injected"
         pad_id = self.braille_vocab['<pad>']
 
-        tgt_key_padding_mask = (braille_ids == pad_id)      # (N, T)
-        mem_key_padding_mask = ~attention_mask.bool()       # (N, S)
+        tgt_key_padding_mask = (braille_ids == pad_id)      
+        mem_key_padding_mask = ~attention_mask.bool()       
 
         dec = self.decoder(
             tgt=tgt,
@@ -361,9 +315,9 @@ class BrailleTranslatorMoE(nn.Module):
             tgt_mask=tgt_mask,
             tgt_key_padding_mask=tgt_key_padding_mask,
             memory_key_padding_mask=mem_key_padding_mask
-        )  # (T, N, D)
+        )  
 
-        out = self.output_layer(dec).transpose(0, 1)  # (N, T, V)
+        out = self.output_layer(dec).transpose(0, 1)  
         return out
 
     @torch.no_grad()
@@ -402,9 +356,6 @@ class BrailleTranslatorMoE(nn.Module):
         return ys
 
 
-# -----------------------------
-# Train / Eval
-# -----------------------------
 def validate_model(model: BrailleTranslatorMoE, val_loader: DataLoader, criterion: nn.Module) -> float:
     model.eval()
     val_loss = 0.0
@@ -622,9 +573,7 @@ def train_model_moe() -> BrailleTranslatorMoE:
     return model
 
 
-# -----------------------------
-# Inference utils
-# -----------------------------
+
 def translate_text(model: BrailleTranslatorMoE, text: str, tokenizer: BertTokenizer, max_length: int = 128) -> str:
     model.eval()
     enc = tokenizer(
@@ -667,9 +616,7 @@ def interactive_translation(model: BrailleTranslatorMoE, tokenizer: BertTokenize
             print("Error:", e)
 
 
-# -----------------------------
-# Main
-# -----------------------------
+
 def main():
     tokenizer = BertTokenizer.from_pretrained(config.bert_path)
     model_path = os.path.join(config.model_dir, 'best_model.pt')
@@ -700,7 +647,7 @@ def main():
             'correct': [p == t for p, t in zip(predictions, targets)]
         })
         results_csv = os.path.join(config.log_dir, 'evaluation_results.csv')
-        # Use utf-8-sig to be safe when opening in Excel on Windows
+
         results_df.to_csv(results_csv, index=False, encoding="utf-8-sig")
         print(f"Test Loss: {test_loss:.4f} | Char Acc: {accuracy:.4f} | BLEU-4: {bleu_score:.4f}")
         print("Saved test details to:", results_csv)
@@ -727,3 +674,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
